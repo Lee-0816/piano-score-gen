@@ -13,7 +13,7 @@ from typing import Optional
 from music21 import (
     stream, meter, key, tempo, clef, instrument,
     note as m21note, chord as m21chord, duration as m21duration,
-    layout, metadata, text
+    layout, metadata, expressions
 )
 
 from backend.models.score import ArrangementResult, NoteData, Measure
@@ -220,7 +220,7 @@ class MuseScoreRenderer:
 
                     # 添加指法标注
                     if note_data.fingering is not None:
-                        fingering_text = text.TextExpression(str(note_data.fingering))
+                        fingering_text = expressions.TextExpression(str(note_data.fingering))
                         fingering_text.style.fontSize = 10
                         fingering_text.style.fontStyle = "italic"
                         m.insert(offset, fingering_text)
