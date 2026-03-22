@@ -99,7 +99,24 @@ def run_generate(args):
 
     # 1. 获取 MIDI 文件
     try:
-        midi_path = get_midi_file(song_name, args.midi)
+        midi_path = None
+        # 优先从 URL 下载
+        if args.url:
+            print(f"🌐 从 URL 下载 MIDI: {args.url}")
+            fetcher = WebMidiFetcher()
+            midi_path = fetcher.download_from_url(args.url, song_name)
+            if not midi_path:
+                raise FileNotFoundError(f"从 URL 下载失败: {args.url}")
+        # 其次用本地文件
+        elif args.midi:
+            midi_path = Path(args.midi)
+            if not midi_path.exists():
+                raise FileNotFoundError(f"指定的 MIDI 文件不存在: {midi_path}")
+        # 最后自动搜索
+        else:
+            midi_path = get_midi_file(song_name)
+            
+        print(f"✅ MIDI 文件: {midi_path}")
     except FileNotFoundError as e:
         print(e)
         sys.exit(1)
@@ -200,7 +217,8 @@ def main():
     )
 
     parser.add_argument("--song", type=str, help="歌曲名称")
-    parser.add_argument("--midi", type=str, help="指定 MIDI 文件路径")
+    parser.add_argument("--midi", type=str, help="指定本地 MIDI 文件路径")
+    parser.add_argument("--url", type=str, help="指定 MIDI 文件的直接下载 URL")
     parser.add_argument(
         "--difficulty",
         type=str,
