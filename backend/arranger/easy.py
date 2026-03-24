@@ -6,6 +6,7 @@
 - 去掉装饰音（过于短促的音符）
 - 音域限制在一个八度内
 - 每个音都标注指法
+- 自动转调到简单调号（C/G/F/D 大调，升降号不超过2个）
 """
 
 from backend.arranger.base import Arranger
@@ -26,6 +27,21 @@ class EasyArranger(Arranger):
     # 最小时值（六十四分音符及更短的视为装饰音，需过滤）
     MIN_DURATION = 0.25
 
+    # 优先使用的简单调号（升号/降号 ≤ 2 个）
+    # 按"调号简单程度"排序
+    # KeySignature(sharps=N) — sharps: 0=C, 1=G, 2=D, 3=A, 4=E, 5=B, 6=F#, 7=C#
+    #                        — sharps: -1=F, -2=Bb, -3=Eb, -4=Ab, -5=Db
+    # C(0), G(1)/F(-1), D(2)/Bb(-2) 都很简单
+    SIMPLE_KEYS = [
+        KeySignature(sharps=0),   # C major (0 升降)
+        KeySignature(sharps=1),   # G major (1 升)
+        KeySignature(sharps=-1),  # F major (1 降)
+        KeySignature(sharps=2),   # D major (2 升)
+        KeySignature(sharps=-2),  # Bb major (2 降)
+        KeySignature(sharps=3),   # A major (3 升)
+        KeySignature(sharps=-3),  # Eb major (3 降)
+    ]
+
     @property
     def difficulty(self) -> DifficultyLevel:
         """返回简单难度。"""
@@ -41,13 +57,15 @@ class EasyArranger(Arranger):
             简单版改编结果
         """
         ts = score.time_signature
-        measure_len = ts.measure_length
 
-        # 提取并简化右手旋律
-        rh_measures = self._build_melody(score, ts)
+        # 计算最佳转调：找到距离最近的简单调号
+        transpose_semitones, target_key = self._find_best_transpose(score.key)
 
-        # 生成左手简单和弦
-        lh_measures = self._build_chords(score, ts)
+        # 提取并简化右手旋律（带转调）
+        rh_measures = self._build_melody(score, ts, transpose_semitones)
+
+        # 生成左手简单和弦（带转调）
+        lh_measures = self._build_chords(score, ts, transpose_semitones)
 
         # 为右手标注指法
         fingering_engine = FingeringEngine()
@@ -64,11 +82,52 @@ class EasyArranger(Arranger):
             left_hand=lh_part,
             title=f"{score.title} (简单版)",
             tempo=max(60, score.tempo - 20),  # 简单版放慢速度
-            key_signature=score.key,
+            key_signature=target_key,
             time_signature=ts,
         )
 
-    def _build_melody(self, score: Score, ts: TimeSignature) -> list[Measure]:
+    def _find_best_transpose(self, original_key: KeySignature) -> tuple[int, KeySignature]:
+        """找到距离原始调性最近的简单调号，返回需要的半音数。
+        
+        简单调号：升号/降号 ≤ 2 个（C, G, F, D, Bb）。
+        
+        Args:
+            original_key: 原始调号
+            
+        Returns:
+            (transpose_semitones, target_key) - 需要升降的半音数和目标调号
+        """
+        from backend.models.score import key_to_semitone
+
+        original_semitone = key_to_semitone(original_key)
+
+        # 如果原始调号已经够简单（≤ 2 升降），直接用
+        if abs(original_key.sharps) <= 2:
+            return 0, original_key
+
+        # 寻找最近的简单调号
+        best_transpose = 0
+        best_key = self.SIMPLE_KEYS[0]  # 默认 C major
+        best_distance = 12
+
+        for key in self.SIMPLE_KEYS:
+            target_semitone = key_to_semitone(key)
+            diff = (target_semitone - original_semitone) % 12
+            if diff > 6:
+                diff = 12 - diff
+            if diff < best_distance:
+                best_distance = diff
+                best_key = key
+                # 计算需要的转调半音数
+                transpose = (target_semitone - original_semitone) % 12
+                if transpose > 6:
+                    transpose -= 12
+                best_transpose = transpose
+
+        return best_transpose, best_key
+
+    def _build_melody(self, score: Score, ts: TimeSignature, 
+                      transpose: int = 0) -> list[Measure]:
         """构建右手旋律声部。
         
         从主旋律声部提取音符，过滤装饰音，限制音域。
@@ -76,6 +135,7 @@ class EasyArranger(Arranger):
         Args:
             score: 原始乐谱
             ts: 拍号
+            transpose: 转调半音数（正值=升，负值=降）
             
         Returns:
             简化后的小节列表
@@ -100,8 +160,10 @@ class EasyArranger(Arranger):
                 if note.duration < self.MIN_DURATION:
                     continue
 
+                # 转调
+                pitch = note.pitch + transpose
+
                 # 限制音域
-                pitch = note.pitch
                 while pitch > EASY_HIGHEST_PITCH:
                     pitch -= 12
                 while pitch < EASY_LOWEST_PITCH:
@@ -128,7 +190,8 @@ class EasyArranger(Arranger):
 
         return measures
 
-    def _build_chords(self, score: Score, ts: TimeSignature) -> list[Measure]:
+    def _build_chords(self, score: Score, ts: TimeSignature,
+                      transpose: int = 0) -> list[Measure]:
         """构建左手和弦伴奏。
         
         从伴奏声部提取和弦信息，简化为柱式和弦。
@@ -137,6 +200,7 @@ class EasyArranger(Arranger):
         Args:
             score: 原始乐谱
             ts: 拍号
+            transpose: 转调半音数
             
         Returns:
             和弦伴奏小节列表
@@ -165,8 +229,8 @@ class EasyArranger(Arranger):
         for i in range(max_measures):
             if i < len(all_notes_by_measure) and all_notes_by_measure[i]:
                 notes = all_notes_by_measure[i]
-                # 提取音高集合
-                pitches = sorted(set(n.pitch for n in notes))
+                # 提取音高集合（带转调）
+                pitches = sorted(set(n.pitch + transpose for n in notes))
                 # 转到低音区
                 bass_pitches = []
                 for p in pitches:

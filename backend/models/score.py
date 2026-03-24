@@ -174,3 +174,39 @@ class ArrangementResult:
     tempo: int = 100
     key_signature: KeySignature = field(default_factory=KeySignature)
     time_signature: TimeSignature = field(default_factory=TimeSignature)
+
+
+# 升降号数 → 半音偏移的映射（Circle of Fifths）
+_SHARPS_TO_SEMITONE = {
+    # 降号方向
+    -7: 11,  # Cb = B
+    -6: 6,   # Gb = F#
+    -5: 1,   # Db = C#
+    -4: 8,   # Ab = G#
+    -3: 3,   # Eb = D#
+    -2: 10,  # Bb
+    -1: 5,   # F
+    # 无升降号
+    0: 0,    # C
+    # 升号方向
+    1: 7,    # G
+    2: 2,    # D
+    3: 9,    # A
+    4: 4,    # E
+    5: 11,   # B
+    6: 6,    # F#
+    7: 1,    # C#
+}
+
+
+def key_to_semitone(key: KeySignature) -> int:
+    """将调号转换为从 C 开始的半音偏移。
+    
+    Args:
+        key: 调号对象
+        
+    Returns:
+        从 C 开始的半音偏移 (0-11)，0 = C 大调
+    """
+    sharps = max(-7, min(7, key.sharps))
+    return _SHARPS_TO_SEMITONE.get(sharps, 0)
